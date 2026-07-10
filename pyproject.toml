@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "schedule-builder"
+version = "2.0.0"
+description = "History-aware doctor schedule optimizer"
+requires-python = ">=3.11"
+dependencies = [
+    "openpyxl>=3.1,<4",
+    "ortools>=9.12,<10",
+]
+
+[project.scripts]
+schedule-builder = "schedule_builder.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["schedule_builder*"]
+

@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from schedule_builder.config import load_config
+from schedule_builder.domain import DoctorMode
+from schedule_builder.errors import ConfigurationError
+
+
+class ConfigTests(unittest.TestCase):
+    def test_modes_assignments_and_rules_are_normalized(self) -> None:
+        raw = {
+            "schedule": {"start": "2026-10-01", "end": "2026-10-07"},
+            "doctors": [
+                {
+                    "name": "Nancy",
+                    "mode": "prescribed",
+                    "overnight_capable": False,
+                    "assignments": {"2026-10-02": "8-6"},
+                    "rules": [
+                        {"type": "allowed_weekdays", "weekdays": ["Thu", "Friday"]},
+                        {"type": "start_date", "date": "2026-10-01"},
+                    ],
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            config = load_config(path)
+        doctor = config.doctors[0]
+        self.assertEqual(doctor.mode, DoctorMode.PRESCRIBED)
+        self.assertEqual(doctor.rules[0].values["weekdays"], [3, 4])
+        self.assertEqual(next(iter(doctor.assignments.values())), "8-6")
+
+    def test_default_doctor_cannot_have_prescribed_assignments(self) -> None:
+        raw = {
+            "schedule": {"start": "2026-10-01", "end": "2026-10-07"},
+            "doctors": [
+                {
+                    "name": "Doctor",
+                    "mode": "default",
+                    "assignments": {"2026-10-02": "8-6"},
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaises(ConfigurationError):
+                load_config(path)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
