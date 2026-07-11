@@ -68,7 +68,7 @@ Add a `time_off` list directly to any doctor:
 
 ```json
 {
-  "name": "Emily",
+  "name": "Dr. Avery",
   "mode": "default",
   "overnight_capable": true,
   "time_off": [
@@ -92,7 +92,7 @@ The optimizer generates the entire schedule.
 
 ```json
 {
-  "name": "Emily",
+  "name": "Dr. Avery",
   "mode": "default",
   "overnight_capable": true,
   "rules": []
@@ -105,7 +105,7 @@ Listed assignments are immutable. Other dates are generated normally. Prescribed
 
 ```json
 {
-  "name": "Adrian",
+  "name": "Dr. Irving",
   "mode": "prescribed",
   "overnight_capable": false,
   "assignments": {
@@ -123,7 +123,7 @@ Only listed assignments are worked; every unlisted date is fixed OFF. Normal res
 
 ```json
 {
-  "name": "Jon",
+  "name": "Dr. Lane",
   "mode": "fixed",
   "overnight_capable": false,
   "assignments": {
@@ -156,7 +156,7 @@ Rules are added to a doctor's `rules` list. Supported categories are:
 | `max_consecutive_days` | `value` | Add a doctor-specific consecutive-day limit. |
 | `rolling_limit` | `window_days`, `max_shifts` | Cap shifts in every rolling window. |
 
-Nancy working only Thursday and Friday is represented as:
+A doctor working only Thursday and Friday is represented as:
 
 ```json
 {"type": "allowed_weekdays", "weekdays": ["Thu", "Fri"]}
@@ -168,7 +168,7 @@ A doctor joining October 10 is represented as:
 {"type": "start_date", "date": "2026-10-10"}
 ```
 
-Emily allowing one- or two-night O/N blocks, but never three nights:
+A doctor allowing one- or two-night O/N blocks, but never three nights:
 
 ```json
 {"type": "max_overnight_block_length", "value": 2}

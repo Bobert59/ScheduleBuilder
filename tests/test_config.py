@@ -16,7 +16,7 @@ class ConfigTests(unittest.TestCase):
             "schedule": {"start": "2026-10-01", "end": "2026-10-07"},
             "doctors": [
                 {
-                    "name": "Nancy",
+                    "name": "Dr. Example",
                     "mode": "prescribed",
                     "overnight_capable": False,
                     "time_off": [

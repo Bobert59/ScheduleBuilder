@@ -19,7 +19,7 @@ class GuiStateTests(unittest.TestCase):
             {
                 "schedule": {"start": "2026-09-21", "end": "2026-10-18"},
                 "custom_future_field": {"keep": True},
-                "doctors": [{"name": "Emily"}],
+                "doctors": [{"name": "Dr. Example"}],
             }
         )
         self.assertTrue(config["custom_future_field"]["keep"])
@@ -38,4 +38,3 @@ class GuiStateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

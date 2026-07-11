@@ -158,7 +158,7 @@ class OptimizerTests(unittest.TestCase):
         overnight_only = RuleSpec("allowed_shifts", {"shifts": ["O/N"]})
         doctors = (
             DoctorConfig(
-                name="Emily",
+                name="Dr. Example",
                 overnight_capable=True,
                 rules=(
                     overnight_only,
@@ -172,7 +172,7 @@ class OptimizerTests(unittest.TestCase):
             source=Path("test.xlsx"),
             dates=history_dates,
             assignments={
-                "Emily": {
+                "Dr. Example": {
                     history_dates[-2]: "O/N",
                     history_dates[-1]: "O/N",
                 }
@@ -180,7 +180,7 @@ class OptimizerTests(unittest.TestCase):
             open_shifts={},
         )
         result = ScheduleOptimizer(fast_config(start, start, doctors), history).solve()
-        self.assertNotIn(start, result.assignments["Emily"])
+        self.assertNotIn(start, result.assignments["Dr. Example"])
         self.assertEqual(result.assignments["Other"][start], "O/N")
 
 

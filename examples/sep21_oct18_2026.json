@@ -27,7 +27,7 @@
   },
   "doctors": [
     {
-      "name": "Emily",
+      "name": "Dr. Avery",
       "mode": "default",
       "overnight_capable": true,
       "max_weekend_pairs": 0,
@@ -37,17 +37,21 @@
       ]
     },
     {
-      "name": "Meaghan",
+      "name": "Dr. Bennett",
       "mode": "default",
       "overnight_capable": true,
       "max_weekend_pairs": 2,
+      "time_off": [
+        {"start": "2026-09-26", "end": "2026-09-29"}
+      ],
       "rules": []
     },
     {
-      "name": "Katherine",
+      "name": "Dr. Chen",
       "mode": "default",
       "overnight_capable": true,
       "max_weekend_pairs": 2,
+      "time_off": ["2026-10-07"],
       "rules": [
         {"type": "max_overnights", "value": 2},
         {
@@ -58,28 +62,31 @@
       ]
     },
     {
-      "name": "Kristyne",
+      "name": "Dr. Diaz",
+      "mode": "default",
+      "overnight_capable": true,
+      "max_weekend_pairs": 2,
+      "time_off": [
+        {"start": "2026-10-09", "end": "2026-10-12"}
+      ],
+      "rules": []
+    },
+    {
+      "name": "Dr. Ellis",
       "mode": "default",
       "overnight_capable": true,
       "max_weekend_pairs": 2,
       "rules": []
     },
     {
-      "name": "Nour",
+      "name": "Dr. Foster",
       "mode": "default",
       "overnight_capable": true,
       "max_weekend_pairs": 2,
       "rules": []
     },
     {
-      "name": "Sydney",
-      "mode": "default",
-      "overnight_capable": true,
-      "max_weekend_pairs": 2,
-      "rules": []
-    },
-    {
-      "name": "Alysha",
+      "name": "Dr. Green",
       "mode": "fixed",
       "overnight_capable": true,
       "assignments": {
@@ -91,7 +98,7 @@
       "rules": []
     },
     {
-      "name": "Nancy",
+      "name": "Dr. Harper",
       "mode": "default",
       "overnight_capable": false,
       "max_weekend_pairs": 2,
@@ -100,28 +107,36 @@
       ]
     },
     {
-      "name": "Adrian",
-      "mode": "default",
+      "name": "Dr. Irving",
+      "mode": "prescribed",
       "overnight_capable": false,
       "max_weekend_pairs": 0,
+      "assignments": {
+        "2026-10-13": "8-6"
+      },
       "rules": [
         {"type": "allowed_shifts", "shifts": ["8-6"]},
         {"type": "max_weekend_days", "value": 0}
       ]
     },
     {
-      "name": "Jeff",
+      "name": "Dr. Jordan",
       "mode": "default",
       "overnight_capable": false,
+      "time_off": [
+        "2026-09-30",
+        {"start": "2026-10-05", "end": "2026-10-06"}
+      ],
       "rules": [
         {"type": "max_total_shifts", "value": 10}
       ]
     },
     {
-      "name": "Jess",
+      "name": "Dr. Kim",
       "mode": "default",
       "overnight_capable": false,
       "rules": [
+        {"type": "start_date", "date": "2026-10-05"},
         {"type": "max_total_shifts", "value": 4},
         {"type": "max_weekend_days", "value": 0}
       ]
