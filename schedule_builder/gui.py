@@ -6,14 +6,16 @@ import json
 import queue
 import tempfile
 import threading
+import time
 import tkinter as tk
 from datetime import date, timedelta
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Any
 
-from .errors import ScheduleBuilderError
+from .errors import ScheduleBuilderError, ScheduleCancelledError
 from .gui_state import (
+    format_elapsed,
     new_config,
     new_doctor,
     normalize_config,
@@ -70,6 +72,9 @@ class ScheduleBuilderApp(ttk.Frame):
         self._loading_doctor = False
         self._task_queue: queue.Queue = queue.Queue()
         self._busy = False
+        self._active_task: str | None = None
+        self._task_cancel_event: threading.Event | None = None
+        self._task_started_at: float | None = None
 
         self._configure_style()
         self._build_toolbar()
@@ -227,7 +232,7 @@ class ScheduleBuilderApp(ttk.Frame):
         )
         ttk.Label(editor, text="Target hours (optional)").grid(row=5, column=0, sticky="w", padx=(0, 10), pady=5)
         ttk.Entry(editor, textvariable=self.doctor_target_var).grid(row=5, column=1, sticky="ew", pady=5)
-        ttk.Label(editor, text="Maximum weekend pairs").grid(row=6, column=0, sticky="w", padx=(0, 10), pady=5)
+        ttk.Label(editor, text="Maximum weekend shifts").grid(row=6, column=0, sticky="w", padx=(0, 10), pady=5)
         ttk.Entry(editor, textvariable=self.doctor_weekends_var).grid(row=6, column=1, sticky="ew", pady=5)
         ttk.Label(
             editor,
@@ -298,7 +303,7 @@ class ScheduleBuilderApp(ttk.Frame):
                     ("rolling_window_days", "Rolling window length", "int"),
                     ("max_shifts_in_rolling_window", "Maximum shifts in rolling window", "int"),
                     ("max_overnights", "Default maximum O/N shifts", "int"),
-                    ("max_weekend_pairs", "Default hard maximum weekend pairs", "int"),
+                    ("max_weekend_shifts", "Default hard maximum weekend shifts", "int"),
                     ("forbid_86_after_88", "Forbid 8-6 immediately after 8-8", "bool"),
                     ("recovery_after_212_days", "Recovery days after a 2-12 block", "int"),
                 ],
@@ -310,6 +315,8 @@ class ScheduleBuilderApp(ttk.Frame):
                     ("hour_balance", "Hour-balance weight", "int"),
                     ("weekend_single", "Split-weekend penalty", "int"),
                     ("isolated_workday", "Isolated-workday penalty", "int"),
+                    ("shift_88_singleton", "Single 8-8 block penalty", "int"),
+                    ("shift_88_triple", "Three-day 8-8 block penalty", "int"),
                 ],
             ),
             (
@@ -362,8 +369,17 @@ class ScheduleBuilderApp(ttk.Frame):
             command=lambda: self._start_task("build"),
         )
         self.generate_button.pack(side="left", padx=(8, 0))
+        self.stop_button = ttk.Button(
+            actions,
+            text="Stop",
+            command=self._stop_task,
+            state="disabled",
+        )
+        self.stop_button.pack(side="left", padx=(8, 0))
         self.progress = ttk.Progressbar(actions, mode="indeterminate", length=240)
         self.progress.pack(side="right")
+        self.elapsed_var = tk.StringVar(value="Elapsed: 00:00:00")
+        ttk.Label(actions, textvariable=self.elapsed_var).pack(side="right", padx=(0, 12))
         self.log = tk.Text(self.run_tab, height=24, wrap="word", font=("Consolas", 10), state="disabled")
         self.log.pack(fill="both", expand=True, pady=(12, 0))
 
@@ -543,7 +559,7 @@ class ScheduleBuilderApp(ttk.Frame):
         self.doctor_target_var.set("" if doctor.get("target_hours") is None else str(doctor["target_hours"]))
         self.doctor_defaults_var.set(bool(doctor.get("use_default_rest_rules", True)))
         self.doctor_weekends_var.set(
-            "" if doctor.get("max_weekend_pairs") is None else str(doctor["max_weekend_pairs"])
+            "" if doctor.get("max_weekend_shifts") is None else str(doctor["max_weekend_shifts"])
         )
         self.current_time_off = copy.deepcopy(doctor.get("time_off", []))
         self.current_assignments = copy.deepcopy(doctor.get("assignments", {}))
@@ -569,9 +585,9 @@ class ScheduleBuilderApp(ttk.Frame):
             doctor.pop("target_hours", None)
         weekends = self.doctor_weekends_var.get().strip()
         if weekends:
-            doctor["max_weekend_pairs"] = int(weekends)
+            doctor["max_weekend_shifts"] = int(weekends)
         else:
-            doctor.pop("max_weekend_pairs", None)
+            doctor.pop("max_weekend_shifts", None)
         doctor["time_off"] = copy.deepcopy(self.current_time_off)
         doctor["assignments"] = dict(sorted(self.current_assignments.items()))
         doctor["rules"] = copy.deepcopy(self.current_rules)
@@ -746,18 +762,28 @@ class ScheduleBuilderApp(ttk.Frame):
             "Replace workbook?", f"{output.name} already exists. Replace it?", parent=self.root
         ):
             return
+        self._active_task = task
+        self._task_cancel_event = threading.Event()
+        self._task_started_at = time.monotonic()
         self._set_busy(True)
         self.notebook.select(self.run_tab)
         self._log(f"\n{task.title()} started…\n")
         thread = threading.Thread(
             target=self._task_worker,
-            args=(task, config, history, output),
+            args=(task, config, history, output, self._task_cancel_event),
             daemon=True,
         )
         thread.start()
         self.root.after(100, self._poll_task)
 
-    def _task_worker(self, task: str, config: dict[str, Any], history: Path, output: Path) -> None:
+    def _task_worker(
+        self,
+        task: str,
+        config: dict[str, Any],
+        history: Path,
+        output: Path,
+        cancel_event: threading.Event,
+    ) -> None:
         temp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8", delete=False) as handle:
@@ -770,8 +796,15 @@ class ScheduleBuilderApp(ttk.Frame):
                     f"{len(imported.dates)} history days ({imported.dates[0]} to {imported.dates[-1]})."
                 )
             else:
-                result = self.service.build(history, temp_path, output)
+                result = self.service.build(
+                    history,
+                    temp_path,
+                    output,
+                    cancel_event=cancel_event,
+                )
             self._task_queue.put(("success", task, result))
+        except ScheduleCancelledError as exc:
+            self._task_queue.put(("cancelled", task, exc))
         except Exception as exc:
             self._task_queue.put(("error", task, exc))
         finally:
@@ -782,12 +815,25 @@ class ScheduleBuilderApp(ttk.Frame):
                     pass
 
     def _poll_task(self) -> None:
+        self._update_elapsed()
         try:
             status, task, result = self._task_queue.get_nowait()
         except queue.Empty:
             self.root.after(100, self._poll_task)
             return
         self._set_busy(False)
+        self._active_task = None
+        self._task_cancel_event = None
+        self._task_started_at = None
+        if status == "cancelled":
+            elapsed = self.elapsed_var.get().removeprefix("Elapsed: ")
+            self._log(f"Generation stopped after {elapsed}.\n")
+            messagebox.showinfo(
+                "Generation stopped",
+                "Schedule generation was stopped. No new workbook was written.",
+                parent=self.root,
+            )
+            return
         if status == "error":
             message = str(result)
             self._log(f"Error: {message}\n")
@@ -809,14 +855,32 @@ class ScheduleBuilderApp(ttk.Frame):
                 )
             messagebox.showinfo("Schedule complete", f"Schedule written to:\n{outcome.output_path}", parent=self.root)
 
+    def _stop_task(self) -> None:
+        if not self._busy or self._active_task != "build" or self._task_cancel_event is None:
+            return
+        self._task_cancel_event.set()
+        self.stop_button.configure(text="Stopping...", state="disabled")
+        self._log("Stop requested; waiting for the optimizer to stop...\n")
+
+    def _update_elapsed(self) -> None:
+        if self._task_started_at is not None:
+            elapsed = time.monotonic() - self._task_started_at
+            self.elapsed_var.set(f"Elapsed: {format_elapsed(elapsed)}")
+
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
         state = "disabled" if busy else "normal"
         self.validate_button.configure(state=state)
         self.generate_button.configure(state=state)
         if busy:
+            self.elapsed_var.set("Elapsed: 00:00:00")
+            self.stop_button.configure(
+                text="Stop",
+                state="normal" if self._active_task == "build" else "disabled",
+            )
             self.progress.start(12)
         else:
+            self.stop_button.configure(text="Stop", state="disabled")
             self.progress.stop()
 
     def _log(self, message: str) -> None:

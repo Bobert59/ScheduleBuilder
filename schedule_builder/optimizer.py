@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import itertools
+import threading
 from datetime import date
 
 from ortools.sat.python import cp_model
@@ -17,7 +18,7 @@ from .domain import (
     ScheduleConfig,
     ScheduleResult,
 )
-from .errors import ScheduleInfeasibleError
+from .errors import ScheduleCancelledError, ScheduleInfeasibleError
 from .rules import RuleContext, apply_rule, unavailable_dates_for
 
 
@@ -34,7 +35,12 @@ def _lexicographic_expression(items: list[tuple[cp_model.LinearExpr | int, int]]
 
 
 class ScheduleOptimizer:
-    def __init__(self, config: ScheduleConfig, history: HistorySchedule):
+    def __init__(
+        self,
+        config: ScheduleConfig,
+        history: HistorySchedule,
+        cancel_event: threading.Event | None = None,
+    ):
         self.config = config
         self.history = history
         self.dates = config.dates
@@ -51,14 +57,19 @@ class ScheduleOptimizer:
         self.overnight_totals: dict[str, cp_model.IntVar] = {}
         self.weekend_singles: list[cp_model.IntVar] = []
         self.isolated_days: list[cp_model.IntVar] = []
+        self.shift_88_singletons: list[cp_model.IntVar] = []
+        self.shift_88_triples: list[cp_model.IntVar] = []
         self.hour_squares: list[cp_model.IntVar] = []
         self.target_hours = self._calculate_target_hours()
         self.phase_reports: list[PhaseReport] = []
+        self.cancel_event = cancel_event
 
     def solve(self) -> ScheduleResult:
         self._build_variables_and_coverage()
         self._lock_user_assignments()
         self._apply_doctor_rules()
+        self._apply_vacation_overnight_rules()
+        self._apply_history_boundary_work_rules()
         self._apply_transition_rules()
         self._build_overnight_rules()
         self._build_weekend_rules()
@@ -107,6 +118,8 @@ class ScheduleOptimizer:
             weights.hour_balance * sum(self.hour_squares)
             + weights.weekend_single * sum(self.weekend_singles)
             + weights.isolated_workday * sum(self.isolated_days)
+            + weights.shift_88_singleton * sum(self.shift_88_singletons)
+            + weights.shift_88_triple * sum(self.shift_88_triples)
         )
         final_solver = self._run_phase("Schedule quality", quality_objective)
         return self._extract_result(final_solver)
@@ -210,6 +223,57 @@ class ScheduleOptimizer:
                     self.model.add(
                         sum(self.x[k, future, self.shift_index[shift]] for shift in DAY_SHIFTS) == 0
                     ).only_enforce_if(end_212)
+
+    def _apply_vacation_overnight_rules(self) -> None:
+        """An O/N shift cannot run into the first day of explicit time off."""
+        overnight = self.shift_index[OVERNIGHT]
+        for k, doctor in enumerate(self.doctors):
+            unavailable = {
+                day
+                for rule in doctor.rules
+                if rule.type == "unavailable_dates"
+                for day in rule.values["dates"]
+            }
+            for d in range(len(self.dates) - 1):
+                if self.dates[d + 1] in unavailable:
+                    self.model.add(self.x[k, d, overnight] == 0)
+
+    def _apply_history_boundary_work_rules(self) -> None:
+        """Extend consecutive-day and rolling limits across history into day one."""
+        history_length = len(self.history.dates)
+        if history_length == 0:
+            return
+        defaults = self.config.default_rules
+        for k, doctor in enumerate(self.doctors):
+            if doctor.mode == DoctorMode.FIXED:
+                continue
+            history_work = [
+                self.model.new_constant(int(self.history.shift_for(doctor.name, day) is not None))
+                for day in self.history.dates
+            ]
+            sequence = history_work + [self.work[k, d] for d in range(len(self.dates))]
+            limits: list[tuple[int, int]] = []
+            if doctor.use_default_rest_rules:
+                limits.append((defaults.max_consecutive_days + 1, defaults.max_consecutive_days))
+                limits.append((defaults.rolling_window_days, defaults.max_shifts_in_rolling_window))
+            for rule in doctor.rules:
+                if rule.type == "max_consecutive_days":
+                    maximum = int(rule.values["value"])
+                    limits.append((maximum + 1, maximum))
+                elif rule.type == "rolling_limit":
+                    limits.append(
+                        (int(rule.values["window_days"]), int(rule.values["max_shifts"]))
+                    )
+
+            for width, maximum in limits:
+                first_start = max(0, history_length - width + 1)
+                for start in range(first_start, history_length):
+                    end = start + width
+                    if end <= history_length or end > len(sequence):
+                        continue
+                    current_indices = range(0, end - history_length)
+                    protected = sum(d in self.protected[k] for d in current_indices)
+                    self.model.add(sum(sequence[start:end]) <= maximum + protected)
 
     def _build_overnight_rules(self) -> None:
         overnight = self.shift_index[OVERNIGHT]
@@ -336,7 +400,7 @@ class ScheduleOptimizer:
         for k, doctor in enumerate(self.doctors):
             if doctor.mode == DoctorMode.FIXED:
                 continue
-            pairs: list[cp_model.IntVar] = []
+            counted_weekend_days: list[cp_model.IntVar] = []
             for saturday, day in enumerate(self.dates):
                 if day.weekday() != 5 or saturday + 1 >= len(self.dates):
                     continue
@@ -345,19 +409,23 @@ class ScheduleOptimizer:
                 self.model.add(pair <= self.work[k, saturday])
                 self.model.add(pair <= self.work[k, sunday])
                 self.model.add(pair >= self.work[k, saturday] + self.work[k, sunday] - 1)
+                if saturday not in self.protected[k]:
+                    counted_weekend_days.append(self.work[k, saturday])
+                if sunday not in self.protected[k]:
+                    counted_weekend_days.append(self.work[k, sunday])
                 if saturday not in self.protected[k] and sunday not in self.protected[k]:
-                    pairs.append(pair)
                     split = self.model.new_bool_var(f"weekend_single_{k}_{saturday}")
                     self.model.add_abs_equality(split, self.work[k, saturday] - self.work[k, sunday])
                     self.weekend_singles.append(split)
             maximum = (
-                doctor.max_weekend_pairs
-                if doctor.max_weekend_pairs is not None
-                else self.config.default_rules.max_weekend_pairs
+                doctor.max_weekend_shifts
+                if doctor.max_weekend_shifts is not None
+                else self.config.default_rules.max_weekend_shifts
             )
-            self.model.add(sum(pairs) <= maximum)
+            self.model.add(sum(counted_weekend_days) <= maximum)
 
     def _build_quality_terms(self) -> None:
+        self._build_88_block_quality_terms()
         for k, doctor in enumerate(self.doctors):
             if doctor.mode != DoctorMode.FIXED:
                 max_hours = len(self.dates) * max(SHIFT_HOURS.values())
@@ -399,6 +467,52 @@ class ScheduleOptimizer:
                 self.model.add(isolated >= current - previous - following)
                 self.isolated_days.append(isolated)
 
+    def _build_88_block_quality_terms(self) -> None:
+        """Prefer two-day 8-8 blocks, including blocks crossing from history."""
+        shift_88 = self.shift_index["8-8"]
+        history_length = len(self.history.dates)
+        for k, doctor in enumerate(self.doctors):
+            if doctor.mode == DoctorMode.FIXED:
+                continue
+            historical_flags = [
+                self.model.new_constant(
+                    int(self.history.shift_for(doctor.name, day) == "8-8")
+                )
+                for day in self.history.dates
+            ]
+            sequence = historical_flags + [
+                self.x[k, d, shift_88] for d in range(len(self.dates))
+            ]
+            for i in range(history_length, len(sequence)):
+                current_day = i - history_length
+                if current_day in self.protected[k]:
+                    continue
+
+                current = sequence[i]
+                end = self.model.new_bool_var(f"shift_88_end_{k}_{i}")
+                if i == len(sequence) - 1:
+                    self.model.add(end == current)
+                else:
+                    following = sequence[i + 1]
+                    self.model.add(end <= current)
+                    self.model.add(end + following <= 1)
+                    self.model.add(end >= current - following)
+
+                previous = sequence[i - 1] if i >= 1 else self.model.new_constant(0)
+                singleton = self.model.new_bool_var(f"shift_88_singleton_{k}_{i}")
+                self.model.add(singleton <= end)
+                self.model.add(singleton + previous <= 1)
+                self.model.add(singleton >= end - previous)
+                self.shift_88_singletons.append(singleton)
+
+                previous_two = sequence[i - 2] if i >= 2 else self.model.new_constant(0)
+                triple = self.model.new_bool_var(f"shift_88_triple_{k}_{i}")
+                self.model.add(triple <= end)
+                self.model.add(triple <= previous)
+                self.model.add(triple <= previous_two)
+                self.model.add(triple >= end + previous + previous_two - 2)
+                self.shift_88_triples.append(triple)
+
     def _coverage_and_weekend_objective(self) -> cp_model.LinearExpr:
         split_cost = max(1, int(self.config.quality_weights.weekend_single))
         weekday_costs = {
@@ -439,6 +553,7 @@ class ScheduleOptimizer:
         return targets
 
     def _run_phase(self, name: str, objective: cp_model.LinearExpr | int) -> cp_model.CpSolver:
+        self._raise_if_cancelled()
         self.model.clear_objective()
         self.model.minimize(objective)
         solver = cp_model.CpSolver()
@@ -447,7 +562,22 @@ class ScheduleOptimizer:
         solver.parameters.num_search_workers = settings.workers
         solver.parameters.random_seed = settings.random_seed
         solver.parameters.log_search_progress = settings.log_progress
-        status = solver.solve(self.model)
+        phase_finished = threading.Event()
+        monitor: threading.Thread | None = None
+        if self.cancel_event is not None:
+            monitor = threading.Thread(
+                target=self._monitor_cancellation,
+                args=(solver, phase_finished),
+                daemon=True,
+            )
+            monitor.start()
+        try:
+            status = solver.solve(self.model)
+        finally:
+            phase_finished.set()
+            if monitor is not None:
+                monitor.join(timeout=0.2)
+        self._raise_if_cancelled()
         if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
             raise ScheduleInfeasibleError(
                 f"{name} phase failed with status {solver.status_name(status)}. "
@@ -462,6 +592,20 @@ class ScheduleOptimizer:
             )
         )
         return solver
+
+    def _monitor_cancellation(
+        self,
+        solver: cp_model.CpSolver,
+        phase_finished: threading.Event,
+    ) -> None:
+        while not phase_finished.wait(0.05):
+            if self.cancel_event is not None and self.cancel_event.is_set():
+                solver.stop_search()
+                return
+
+    def _raise_if_cancelled(self) -> None:
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            raise ScheduleCancelledError("Schedule generation was stopped.")
 
     def _extract_result(self, solver: cp_model.CpSolver) -> ScheduleResult:
         assignments: dict[str, dict[date, str]] = {}

@@ -245,10 +245,14 @@ def _doctor(raw: Any, start: date, end: date, index: int) -> DoctorConfig:
     target = raw.get("target_hours")
     if target is not None:
         target = _positive_int(target, f"target_hours for {name}", allow_zero=True)
-    max_weekend_pairs = raw.get("max_weekend_pairs")
-    if max_weekend_pairs is not None:
-        max_weekend_pairs = _positive_int(
-            max_weekend_pairs, f"max_weekend_pairs for {name}", allow_zero=True
+    max_weekend_shifts = raw.get("max_weekend_shifts")
+    if max_weekend_shifts is None and raw.get("max_weekend_pairs") is not None:
+        max_weekend_shifts = 2 * _positive_int(
+            raw["max_weekend_pairs"], f"legacy max_weekend_pairs for {name}", allow_zero=True
+        )
+    if max_weekend_shifts is not None:
+        max_weekend_shifts = _positive_int(
+            max_weekend_shifts, f"max_weekend_shifts for {name}", allow_zero=True
         )
     return DoctorConfig(
         name=name,
@@ -258,7 +262,7 @@ def _doctor(raw: Any, start: date, end: date, index: int) -> DoctorConfig:
         rules=rules,
         target_hours=target,
         use_default_rest_rules=bool(raw.get("use_default_rest_rules", True)),
-        max_weekend_pairs=max_weekend_pairs,
+        max_weekend_shifts=max_weekend_shifts,
     )
 
 
@@ -299,7 +303,14 @@ def load_config(path: str | Path) -> ScheduleConfig:
                 )
             occupied[key] = doctor.name
 
-    defaults_raw = raw.get("default_rules", {})
+    defaults_raw = dict(raw.get("default_rules", {}))
+    if "max_weekend_shifts" not in defaults_raw and "max_weekend_pairs" in defaults_raw:
+        defaults_raw["max_weekend_shifts"] = 2 * _positive_int(
+            defaults_raw["max_weekend_pairs"],
+            "legacy default_rules.max_weekend_pairs",
+            allow_zero=True,
+        )
+    defaults_raw.pop("max_weekend_pairs", None)
     quality_raw = raw.get("quality_weights", {})
     solver_raw = raw.get("solver", {})
     try:

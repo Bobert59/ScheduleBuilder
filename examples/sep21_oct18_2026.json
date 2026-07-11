@@ -10,14 +10,16 @@
     "rolling_window_days": 5,
     "max_shifts_in_rolling_window": 3,
     "max_overnights": 6,
-    "max_weekend_pairs": 1,
+    "max_weekend_shifts": 4,
     "forbid_86_after_88": true,
     "recovery_after_212_days": 2
   },
   "quality_weights": {
     "hour_balance": 1,
     "weekend_single": 10000,
-    "isolated_workday": 20
+    "isolated_workday": 20,
+    "shift_88_singleton": 250,
+    "shift_88_triple": 25
   },
   "solver": {
     "max_time_per_phase_seconds": 60,
@@ -30,7 +32,7 @@
       "name": "Dr. Avery",
       "mode": "default",
       "overnight_capable": true,
-      "max_weekend_pairs": 0,
+      "max_weekend_shifts": 0,
       "rules": [
         {"type": "max_overnight_block_length", "value": 2},
         {"type": "max_weekend_days", "value": 0}
@@ -40,7 +42,7 @@
       "name": "Dr. Bennett",
       "mode": "default",
       "overnight_capable": true,
-      "max_weekend_pairs": 2,
+      "max_weekend_shifts": 4,
       "time_off": [
         {"start": "2026-09-26", "end": "2026-09-29"}
       ],
@@ -50,7 +52,7 @@
       "name": "Dr. Chen",
       "mode": "default",
       "overnight_capable": true,
-      "max_weekend_pairs": 2,
+      "max_weekend_shifts": 4,
       "time_off": ["2026-10-07"],
       "rules": [
         {"type": "max_overnights", "value": 2},
@@ -65,7 +67,7 @@
       "name": "Dr. Diaz",
       "mode": "default",
       "overnight_capable": true,
-      "max_weekend_pairs": 2,
+      "max_weekend_shifts": 4,
       "time_off": [
         {"start": "2026-10-09", "end": "2026-10-12"}
       ],
@@ -75,14 +77,14 @@
       "name": "Dr. Ellis",
       "mode": "default",
       "overnight_capable": true,
-      "max_weekend_pairs": 2,
+      "max_weekend_shifts": 4,
       "rules": []
     },
     {
       "name": "Dr. Foster",
       "mode": "default",
       "overnight_capable": true,
-      "max_weekend_pairs": 2,
+      "max_weekend_shifts": 4,
       "rules": []
     },
     {
@@ -101,7 +103,7 @@
       "name": "Dr. Harper",
       "mode": "default",
       "overnight_capable": false,
-      "max_weekend_pairs": 2,
+      "max_weekend_shifts": 4,
       "rules": [
         {"type": "max_consecutive_days", "value": 2}
       ]
@@ -110,7 +112,7 @@
       "name": "Dr. Irving",
       "mode": "prescribed",
       "overnight_capable": false,
-      "max_weekend_pairs": 0,
+      "max_weekend_shifts": 0,
       "assignments": {
         "2026-10-13": "8-6"
       },

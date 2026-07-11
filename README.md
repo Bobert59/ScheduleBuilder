@@ -43,7 +43,7 @@ The app provides four screens:
 1. **Setup:** select the previous workbook, schedule dates, output location, and target-hour settings.
 2. **Doctors:** add/edit doctors, choose Default/Prescribed/Fixed mode, select vacation ranges on a calendar, enter protected shifts, and manage doctor-specific rules.
 3. **Advanced settings:** edit default rest rules, weekend penalties, and solver settings.
-4. **Generate:** validate inputs and run the optimizer without freezing the interface.
+4. **Generate:** validate inputs and run the optimizer without freezing the interface. A live elapsed-time counter remains visible during generation, and **Stop** cancels the active solver run without writing a new workbook.
 
 Configurations can be opened and saved as JSON, so files created in the GUI remain compatible with the command line. Fixed and prescribed assignment ranges, vacation ranges, join/leave dates, and other date-based rules use calendar dialogs.
 
@@ -60,7 +60,7 @@ py -3.12 -m schedule_builder build `
   --output "Sep21_Oct18_Schedule.xlsx"
 ```
 
-The history workbook must end on the day immediately before the new schedule starts. Date headers are checked, and every visible column is imported. `OPEN` rows in the history are recorded as uncovered history but are not treated as doctors.
+The history workbook must end on the day immediately before the new schedule starts. Date headers are checked, and every visible column is imported. The reader accepts either combined headers (`Mon` and `Aug 24` in one cell) or the final two-row layout with weekdays above month/day values. `OPEN` rows in the history are recorded as uncovered history but are not treated as doctors.
 
 ## Vacation and time off
 
@@ -181,10 +181,14 @@ New rule categories can be added by registering a handler in `schedule_builder/r
 The model uses three phases:
 
 1. **Overnights:** avoid OPEN O/N, avoid singleton nights, balance combined history/new O/N totals, and prefer two-night over three-night blocks.
-2. **Coverage and weekends:** jointly weigh OPEN placement against Saturday/Sunday splits. Weekday OPEN shifts are cheaper than split weekends, while weekend OPEN shifts are much more expensive. `max_weekend_pairs` remains a hard doctor-specific cap.
-3. **Schedule quality:** balance visible-period hours and discourage isolated workdays without undoing the earlier decisions.
+2. **Coverage and weekends:** jointly weigh OPEN placement against Saturday/Sunday splits. Weekday OPEN shifts are cheaper than split weekends, while weekend OPEN shifts are much more expensive. `max_weekend_shifts` is a hard doctor-specific cap and defaults to four shifts (normally two Saturday/Sunday pairs).
+3. **Schedule quality:** balance visible-period hours, discourage isolated workdays, and prefer 8-8 shifts in two-day blocks without undoing the earlier decisions.
 
 `quality_weights.weekend_single` controls how strongly a split weekend is discouraged. Its default working value is `10000`; raising it makes the model more willing to leave weekday shifts OPEN to avoid splits, while lowering it favors coverage. Weekend OPEN costs scale above this value, so increasing it does not make weekend coverage casually disappear.
+
+The 12-hour shifts prefer two-day blocks. O/N grouping is handled first and remains strict: singleton nights are heavily discouraged and three-night blocks receive a small final tie-break penalty. For 8-8 shifts, `quality_weights.shift_88_singleton` (default `250`) discourages isolated shifts and `quality_weights.shift_88_triple` (default `25`) lightly discourages three-day blocks. These are preferences rather than hard limits, and they include an 8-8 block that begins in the imported history. The grouping preference does not apply to 8-6 or 2-12 shifts.
+
+Work-streak and rolling-window limits include the end of the imported history period. An O/N shift is also forbidden on the day immediately before an explicit vacation or unavailable date because that shift continues into the following morning.
 
 Because earlier decisions are frozen, hour balancing cannot undo a better overnight plan or move an OPEN shift into a less desirable category.
 

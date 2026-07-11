@@ -77,6 +77,19 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(ConfigurationError):
                 load_config(path)
 
+    def test_legacy_weekend_pair_limits_are_migrated_to_shift_limits(self) -> None:
+        raw = {
+            "schedule": {"start": "2026-10-01", "end": "2026-10-07"},
+            "default_rules": {"max_weekend_pairs": 2},
+            "doctors": [{"name": "Dr. Legacy", "max_weekend_pairs": 1}],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            config = load_config(path)
+        self.assertEqual(config.default_rules.max_weekend_shifts, 4)
+        self.assertEqual(config.doctors[0].max_weekend_shifts, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

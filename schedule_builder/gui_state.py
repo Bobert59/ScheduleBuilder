@@ -36,7 +36,7 @@ def new_config() -> dict[str, Any]:
             "rolling_window_days": 5,
             "max_shifts_in_rolling_window": 3,
             "max_overnights": 6,
-            "max_weekend_pairs": 1,
+            "max_weekend_shifts": 4,
             "forbid_86_after_88": True,
             "recovery_after_212_days": 2,
         },
@@ -44,6 +44,8 @@ def new_config() -> dict[str, Any]:
             "hour_balance": 1,
             "weekend_single": 10_000,
             "isolated_workday": 20,
+            "shift_88_singleton": 250,
+            "shift_88_triple": 25,
         },
         "solver": {
             "max_time_per_phase_seconds": 60,
@@ -75,6 +77,8 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
         result.setdefault(key, baseline[key])
     for section in ("default_rules", "quality_weights", "solver"):
         values = result.setdefault(section, {})
+        if section == "default_rules" and "max_weekend_shifts" not in values and "max_weekend_pairs" in values:
+            values["max_weekend_shifts"] = int(values.pop("max_weekend_pairs")) * 2
         for key, value in baseline[section].items():
             values.setdefault(key, value)
     doctors = result.setdefault("doctors", [])
@@ -84,6 +88,8 @@ def normalize_config(raw: dict[str, Any]) -> dict[str, Any]:
         doctor.setdefault("time_off", [])
         doctor.setdefault("assignments", {})
         doctor.setdefault("rules", [])
+        if "max_weekend_shifts" not in doctor and "max_weekend_pairs" in doctor:
+            doctor["max_weekend_shifts"] = int(doctor.pop("max_weekend_pairs")) * 2
     return result
 
 
@@ -121,3 +127,9 @@ def suggested_output_name(config: dict[str, Any]) -> str:
         return "Doctor_Schedule.xlsx"
     return f"{start:%b%d}_{end:%b%d}_Schedule.xlsx"
 
+
+def format_elapsed(seconds: float) -> str:
+    total_seconds = max(0, int(seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"

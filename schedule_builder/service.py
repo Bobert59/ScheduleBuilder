@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Event
 
 from .config import load_config
 from .domain import HistorySchedule, ScheduleConfig, ScheduleResult
 from .excel import write_schedule_workbook
+from .errors import ScheduleCancelledError
 from .history import read_history_workbook
 from .optimizer import ScheduleOptimizer
 
@@ -33,9 +35,13 @@ class ScheduleBuilderService:
         history_path: str | Path,
         config_path: str | Path,
         output_path: str | Path,
+        cancel_event: Event | None = None,
     ) -> BuildOutcome:
         config, history = self.validate(history_path, config_path)
-        result = ScheduleOptimizer(config, history).solve()
+        if cancel_event is not None and cancel_event.is_set():
+            raise ScheduleCancelledError("Schedule generation was stopped.")
+        result = ScheduleOptimizer(config, history, cancel_event=cancel_event).solve()
+        if cancel_event is not None and cancel_event.is_set():
+            raise ScheduleCancelledError("Schedule generation was stopped.")
         output = write_schedule_workbook(output_path, config, history, result)
         return BuildOutcome(output_path=output, config=config, history=history, result=result)
-

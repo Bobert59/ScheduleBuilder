@@ -39,7 +39,7 @@ class DoctorConfig:
     rules: tuple[RuleSpec, ...] = ()
     target_hours: int | None = None
     use_default_rest_rules: bool = True
-    max_weekend_pairs: int | None = None
+    max_weekend_shifts: int | None = None
 
     def is_protected(self, day: date) -> bool:
         return self.mode in {DoctorMode.FIXED, DoctorMode.PRESCRIBED} and day in self.assignments
@@ -51,7 +51,7 @@ class DefaultRules:
     rolling_window_days: int = 5
     max_shifts_in_rolling_window: int = 3
     max_overnights: int = 6
-    max_weekend_pairs: int = 1
+    max_weekend_shifts: int = 4
     forbid_86_after_88: bool = True
     recovery_after_212_days: int = 2
 
@@ -61,6 +61,8 @@ class QualityWeights:
     hour_balance: int = 1
     weekend_single: int = 10_000
     isolated_workday: int = 20
+    shift_88_singleton: int = 250
+    shift_88_triple: int = 25
 
 
 @dataclass(frozen=True)

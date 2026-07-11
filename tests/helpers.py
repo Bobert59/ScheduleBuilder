@@ -11,18 +11,26 @@ def make_history_workbook(
     start: date,
     days: int,
     rows: dict[str, dict[date, str]],
+    *,
+    split_headers: bool = False,
 ) -> Path:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Schedule"
-    sheet.cell(1, 1, "Doctor")
     dates = [start + timedelta(days=offset) for offset in range(days)]
-    for column, day in enumerate(dates, start=2):
-        sheet.cell(1, column, f"{day:%a}\n{day:%b %d}")
-    for row, (name, assignments) in enumerate(rows.items(), start=2):
+    if split_headers:
+        for column, day in enumerate(dates, start=2):
+            sheet.cell(1, column, f"{day:%a}")
+            sheet.cell(2, column, f"{day:%b %d}")
+        first_doctor_row = 3
+    else:
+        sheet.cell(1, 1, "Doctor")
+        for column, day in enumerate(dates, start=2):
+            sheet.cell(1, column, f"{day:%a}\n{day:%b %d}")
+        first_doctor_row = 2
+    for row, (name, assignments) in enumerate(rows.items(), start=first_doctor_row):
         sheet.cell(row, 1, name)
         for column, day in enumerate(dates, start=2):
             sheet.cell(row, column, assignments.get(day))
     workbook.save(path)
     return path
-

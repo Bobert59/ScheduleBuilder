@@ -13,3 +13,6 @@ class HistoryFormatError(ScheduleBuilderError):
 class ScheduleInfeasibleError(ScheduleBuilderError):
     """Raised when the optimizer cannot find a feasible schedule."""
 
+
+class ScheduleCancelledError(ScheduleBuilderError):
+    """Raised when the user stops schedule generation."""

@@ -2,10 +2,20 @@ from __future__ import annotations
 
 import unittest
 
-from schedule_builder.gui_state import new_config, normalize_config, rule_label, suggested_output_name
+from schedule_builder.gui_state import (
+    format_elapsed,
+    new_config,
+    normalize_config,
+    rule_label,
+    suggested_output_name,
+)
 
 
 class GuiStateTests(unittest.TestCase):
+    def test_elapsed_time_is_formatted_for_long_runs(self) -> None:
+        self.assertEqual(format_elapsed(0), "00:00:00")
+        self.assertEqual(format_elapsed(3661.9), "01:01:01")
+
     def test_new_config_contains_every_editable_section(self) -> None:
         config = new_config()
         self.assertIn("schedule", config)
@@ -25,6 +35,8 @@ class GuiStateTests(unittest.TestCase):
         self.assertTrue(config["custom_future_field"]["keep"])
         self.assertEqual(config["doctors"][0]["time_off"], [])
         self.assertIn("weekend_single", config["quality_weights"])
+        self.assertIn("shift_88_singleton", config["quality_weights"])
+        self.assertIn("shift_88_triple", config["quality_weights"])
 
     def test_output_name_and_rule_summary_are_human_readable(self) -> None:
         config = new_config()

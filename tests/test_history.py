@@ -64,6 +64,22 @@ class HistoryTests(unittest.TestCase):
             },
         )
 
+    def test_split_weekday_and_date_header_rows_are_supported(self) -> None:
+        start = date(2026, 8, 24)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "split_headers.xlsx"
+            make_history_workbook(
+                path,
+                start,
+                4,
+                {"Alice": {start: "8-6", start + timedelta(days=1): "O/N"}},
+                split_headers=True,
+            )
+            history = read_history_workbook(path, expected_end=date(2026, 8, 27))
+        self.assertEqual(history.dates[0], start)
+        self.assertEqual(history.assignments["Alice"][start], "8-6")
+        self.assertEqual(history.assignments["Alice"][start + timedelta(days=1)], "O/N")
+
 
 if __name__ == "__main__":
     unittest.main()
