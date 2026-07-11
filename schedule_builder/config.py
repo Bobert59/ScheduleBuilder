@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +45,7 @@ SUPPORTED_RULES = {
     "allowed_shifts",
     "max_total_shifts",
     "max_overnights",
+    "max_overnight_block_length",
     "max_weekend_days",
     "max_consecutive_days",
     "rolling_limit",
@@ -54,10 +55,18 @@ SUPPORTED_RULES = {
 def _date(value: Any, label: str) -> date:
     if isinstance(value, date):
         return value
+    text = str(value)
     try:
-        return date.fromisoformat(str(value))
-    except ValueError as exc:
-        raise ConfigurationError(f"{label} must be an ISO date (YYYY-MM-DD), got {value!r}.") from exc
+        return date.fromisoformat(text)
+    except ValueError:
+        pass
+    try:
+        year, month, day = (int(part) for part in text.split("-"))
+        return date(year, month, day)
+    except (TypeError, ValueError):
+        raise ConfigurationError(
+            f"{label} must be a date such as YYYY-MM-DD, got {value!r}."
+        ) from None
 
 
 def _positive_int(value: Any, label: str, *, allow_zero: bool = False) -> int:
@@ -71,6 +80,38 @@ def _positive_int(value: Any, label: str, *, allow_zero: bool = False) -> int:
     if parsed < minimum:
         raise ConfigurationError(f"{label} must be at least {minimum}.")
     return parsed
+
+
+def _expand_time_off(raw_items: Any, doctor_name: str) -> tuple[date, ...]:
+    if not isinstance(raw_items, list):
+        raise ConfigurationError(
+            f"time_off for {doctor_name} must be a list of ISO dates or date ranges."
+        )
+    expanded: list[date] = []
+    for index, item in enumerate(raw_items, start=1):
+        label = f"time_off entry {index} for {doctor_name}"
+        if isinstance(item, str) or isinstance(item, date):
+            expanded.append(_date(item, label))
+            continue
+        if not isinstance(item, dict):
+            raise ConfigurationError(
+                f"{label} must be an ISO date or an object with start and end dates."
+            )
+        if set(item) != {"start", "end"}:
+            raise ConfigurationError(
+                f"{label} must contain exactly 'start' and 'end'."
+            )
+        range_start = _date(item["start"], f"{label}.start")
+        range_end = _date(item["end"], f"{label}.end")
+        if range_end < range_start:
+            raise ConfigurationError(
+                f"{label} ends before it starts ({range_start} to {range_end})."
+            )
+        expanded.extend(
+            range_start + timedelta(days=offset)
+            for offset in range((range_end - range_start).days + 1)
+        )
+    return tuple(dict.fromkeys(expanded))
 
 
 def _normalize_rule(raw: Any, doctor_name: str, index: int) -> RuleSpec:
@@ -131,10 +172,15 @@ def _normalize_rule(raw: Any, doctor_name: str, index: int) -> RuleSpec:
     elif rule_type in {
         "max_total_shifts",
         "max_overnights",
+        "max_overnight_block_length",
         "max_weekend_days",
         "max_consecutive_days",
     }:
         values["value"] = _positive_int(values.get("value"), f"{rule_type} for {doctor_name}", allow_zero=True)
+        if rule_type == "max_overnight_block_length" and values["value"] not in (1, 2, 3):
+            raise ConfigurationError(
+                f"max_overnight_block_length for {doctor_name} must be 1, 2, or 3."
+            )
     elif rule_type == "rolling_limit":
         values["window_days"] = _positive_int(
             values.get("window_days"), f"rolling_limit.window_days for {doctor_name}"
@@ -183,6 +229,19 @@ def _doctor(raw: Any, start: date, end: date, index: int) -> DoctorConfig:
     if not isinstance(rules_raw, list):
         raise ConfigurationError(f"rules for {name} must be a list.")
     rules = tuple(_normalize_rule(rule, name, i) for i, rule in enumerate(rules_raw))
+
+    time_off = _expand_time_off(raw.get("time_off", []), name)
+    outside_window = [day for day in time_off if not start <= day <= end]
+    if outside_window:
+        raise ConfigurationError(
+            f"time_off dates for {name} are outside the schedule window: "
+            f"{', '.join(day.isoformat() for day in outside_window)}."
+        )
+    if time_off:
+        rules = (
+            RuleSpec("unavailable_dates", {"dates": list(time_off)}),
+            *rules,
+        )
     target = raw.get("target_hours")
     if target is not None:
         target = _positive_int(target, f"target_hours for {name}", allow_zero=True)

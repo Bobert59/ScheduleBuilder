@@ -59,7 +59,7 @@ class DefaultRules:
 @dataclass(frozen=True)
 class QualityWeights:
     hour_balance: int = 1
-    weekend_single: int = 5_000
+    weekend_single: int = 10_000
     isolated_workday: int = 20
 
 
@@ -122,4 +122,3 @@ class ScheduleResult:
     target_hours: dict[str, int]
     history_overnights: dict[str, int]
     phase_reports: tuple[PhaseReport, ...]
-

@@ -30,6 +30,25 @@ The required libraries are OR-Tools and openpyxl.
 
 ## Building a schedule
 
+### Windows desktop app
+
+Double-click `Launch Schedule Builder.vbs` for a normal window without a console. The `.bat` launcher is also available for troubleshooting, or run:
+
+```powershell
+py -3.12 -m schedule_builder.gui
+```
+
+The app provides four screens:
+
+1. **Setup:** select the previous workbook, schedule dates, output location, and target-hour settings.
+2. **Doctors:** add/edit doctors, choose Default/Prescribed/Fixed mode, select vacation ranges on a calendar, enter protected shifts, and manage doctor-specific rules.
+3. **Advanced settings:** edit default rest rules, weekend penalties, and solver settings.
+4. **Generate:** validate inputs and run the optimizer without freezing the interface.
+
+Configurations can be opened and saved as JSON, so files created in the GUI remain compatible with the command line. Fixed and prescribed assignment ranges, vacation ranges, join/leave dates, and other date-based rules use calendar dialogs.
+
+### Command line
+
 ```powershell
 py -3.12 -m schedule_builder validate `
   --history "Aug24_Sep20_Schedule.xlsx" `
@@ -42,6 +61,28 @@ py -3.12 -m schedule_builder build `
 ```
 
 The history workbook must end on the day immediately before the new schedule starts. Date headers are checked, and every visible column is imported. `OPEN` rows in the history are recorded as uncovered history but are not treated as doctors.
+
+## Vacation and time off
+
+Add a `time_off` list directly to any doctor:
+
+```json
+{
+  "name": "Emily",
+  "mode": "default",
+  "overnight_capable": true,
+  "time_off": [
+    "2026-09-28",
+    {
+      "start": "2026-10-05",
+      "end": "2026-10-16"
+    }
+  ],
+  "rules": []
+}
+```
+
+Individual dates and inclusive ranges can be mixed in the same list. In the example, September 28 and every date from October 5 through October 16 are unavailable. All dates must fall inside the new schedule window. A prescribed assignment on the same date takes priority. Fixed doctors work only their listed assignments, so their `time_off` list is normally empty.
 
 ## Doctor modes
 
@@ -109,7 +150,8 @@ Rules are added to a doctor's `rules` list. Supported categories are:
 | `allowed_shifts` | `shifts` | Assign only selected shift types. |
 | `forbidden_shift_weekdays` | `shifts`, `weekdays` | Forbid selected shifts on selected weekdays. |
 | `max_total_shifts` | `value` | Cap automatically generated shifts. |
-| `max_overnights` | `value` | Set an individual O/N cap. |
+| `max_overnights` | `value` | Cap the total automatically generated O/N shifts in the new schedule. |
+| `max_overnight_block_length` | `value` | Limit O/N blocks to 1, 2, or 3 nights, including across the history boundary. |
 | `max_weekend_days` | `value` | Cap automatically generated weekend days. |
 | `max_consecutive_days` | `value` | Add a doctor-specific consecutive-day limit. |
 | `rolling_limit` | `window_days`, `max_shifts` | Cap shifts in every rolling window. |
@@ -126,6 +168,12 @@ A doctor joining October 10 is represented as:
 {"type": "start_date", "date": "2026-10-10"}
 ```
 
+Emily allowing one- or two-night O/N blocks, but never three nights:
+
+```json
+{"type": "max_overnight_block_length", "value": 2}
+```
+
 New rule categories can be added by registering a handler in `schedule_builder/rules.py`; configuration parsing and constraint logic remain isolated from Excel and the command line.
 
 ## Optimization order
@@ -133,8 +181,10 @@ New rule categories can be added by registering a handler in `schedule_builder/r
 The model uses three phases:
 
 1. **Overnights:** avoid OPEN O/N, avoid singleton nights, balance combined history/new O/N totals, and prefer two-night over three-night blocks.
-2. **OPEN priority:** freeze the exact best uncovered-shift distribution. When OPEN is unavoidable, it is used in this order: weekday `8-6`, weekday `8-8`, weekday `2-12`, weekend `8-6`, weekend `8-8`, weekend `2-12`, then O/N.
-3. **Schedule quality:** balance visible-period hours, strongly prefer Saturday/Sunday pairs, and discourage isolated workdays.
+2. **Coverage and weekends:** jointly weigh OPEN placement against Saturday/Sunday splits. Weekday OPEN shifts are cheaper than split weekends, while weekend OPEN shifts are much more expensive. `max_weekend_pairs` remains a hard doctor-specific cap.
+3. **Schedule quality:** balance visible-period hours and discourage isolated workdays without undoing the earlier decisions.
+
+`quality_weights.weekend_single` controls how strongly a split weekend is discouraged. Its default working value is `10000`; raising it makes the model more willing to leave weekday shifts OPEN to avoid splits, while lowering it favors coverage. Weekend OPEN costs scale above this value, so increasing it does not make weekend coverage casually disappear.
 
 Because earlier decisions are frozen, hour balancing cannot undo a better overnight plan or move an OPEN shift into a less desirable category.
 

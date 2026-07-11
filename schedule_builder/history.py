@@ -38,6 +38,17 @@ def _header_parts(value: object) -> tuple[int, int, int | None]:
     return month, int(match.group("day")), weekday
 
 
+def _shift_name(value: object) -> str | None:
+    """Normalize shift cells, including labels Excel automatically converted to dates."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, (datetime, date)):
+        candidate = f"{value.month}-{value.day}"
+        return candidate if candidate in SHIFT_NAMES else None
+    candidate = str(value).strip()
+    return candidate if candidate in SHIFT_NAMES else None
+
+
 def read_history_workbook(path: str | Path, expected_end: date) -> HistorySchedule:
     source = Path(path)
     try:
@@ -89,10 +100,10 @@ def read_history_workbook(path: str | Path, expected_end: date) -> HistorySchedu
                 raw_shift = sheet.cell(row=row, column=column).value
                 if raw_shift in (None, ""):
                     continue
-                shift = str(raw_shift).strip()
-                if shift not in SHIFT_NAMES:
+                shift = _shift_name(raw_shift)
+                if shift is None:
                     raise HistoryFormatError(
-                        f"Unknown shift {shift!r} for {name} on {day:%Y-%m-%d}."
+                        f"Unknown shift {raw_shift!r} for {name} on {day:%Y-%m-%d}."
                     )
                 if is_open:
                     open_lists[day].append(shift)

@@ -47,6 +47,7 @@ class ScheduleOptimizer:
         self.protected: dict[int, set[int]] = {}
         self.overnight_singletons: list[cp_model.IntVar] = []
         self.overnight_triples: list[cp_model.IntVar] = []
+        self.overnight_weekend_breaks: list[cp_model.IntVar] = []
         self.overnight_totals: dict[str, cp_model.IntVar] = {}
         self.weekend_singles: list[cp_model.IntVar] = []
         self.isolated_days: list[cp_model.IntVar] = []
@@ -76,6 +77,10 @@ class ScheduleOptimizer:
                 (open_overnights, len(self.dates)),
                 (singleton_count, len(self.doctors) * len(self.dates)),
                 (spread, history_and_window),
+                (
+                    sum(self.overnight_weekend_breaks),
+                    len(self.doctors) * max(1, len(self.dates) // 7),
+                ),
                 (pairwise_difference, pair_count * history_and_window),
                 (triple_count, len(self.doctors) * len(self.dates)),
             ]
@@ -88,14 +93,13 @@ class ScheduleOptimizer:
         for d in range(len(self.dates)):
             self.model.add(self.open[d, overnight_index] == overnight_solver.boolean_value(self.open[d, overnight_index]))
 
-        # Phase 2: exact OPEN priority. The first element is the least acceptable category.
-        open_categories = self._open_priority_counts()
-        open_objective = _lexicographic_expression(
-            [(expression, len(self.dates)) for _, expression in open_categories]
-        )
-        open_solver = self._run_phase("OPEN priority", open_objective)
-        for _, expression in open_categories:
-            self.model.add(expression == open_solver.value(expression))
+        # Phase 2: trade inexpensive weekday OPEN shifts against split-weekend penalties.
+        coverage_objective = self._coverage_and_weekend_objective()
+        coverage_solver = self._run_phase("Coverage and weekends", coverage_objective)
+        self.model.add(coverage_objective == coverage_solver.value(coverage_objective))
+        if self.weekend_singles:
+            weekend_count = sum(self.weekend_singles)
+            self.model.add(weekend_count == coverage_solver.value(weekend_count))
 
         # Phase 3: preserve all earlier decisions while improving the human-facing roster.
         weights = self.config.quality_weights
@@ -230,10 +234,42 @@ class ScheduleOptimizer:
             if not doctor.overnight_capable or doctor.mode == DoctorMode.FIXED:
                 continue
 
-            for start in range(len(sequence) - 3):
-                current_indices = [i - history_length for i in range(start, start + 4) if i >= history_length]
+            for saturday, day in enumerate(self.dates):
+                if day.weekday() != 5 or saturday + 1 >= len(self.dates):
+                    continue
+                sunday = saturday + 1
+                if saturday in self.protected[k] or sunday in self.protected[k]:
+                    continue
+                saturday_end = self.model.new_bool_var(
+                    f"overnight_weekend_break_{k}_{saturday}"
+                )
+                self.model.add(saturday_end <= current_flags[saturday])
+                self.model.add(saturday_end + current_flags[sunday] <= 1)
+                self.model.add(
+                    saturday_end >= current_flags[saturday] - current_flags[sunday]
+                )
+                self.overnight_weekend_breaks.append(saturday_end)
+
+            maximum_block_length = min(
+                (
+                    int(rule.values["value"])
+                    for rule in doctor.rules
+                    if rule.type == "max_overnight_block_length"
+                ),
+                default=3,
+            )
+            block_window = maximum_block_length + 1
+            for start in range(len(sequence) - block_window + 1):
+                current_indices = [
+                    i - history_length
+                    for i in range(start, start + block_window)
+                    if i >= history_length
+                ]
                 protected = sum(d in self.protected[k] for d in current_indices)
-                self.model.add(sum(sequence[start : start + 4]) <= 3 + protected)
+                self.model.add(
+                    sum(sequence[start : start + block_window])
+                    <= maximum_block_length + protected
+                )
 
             for i in range(len(sequence)):
                 current = sequence[i]
@@ -363,30 +399,25 @@ class ScheduleOptimizer:
                 self.model.add(isolated >= current - previous - following)
                 self.isolated_days.append(isolated)
 
-    def _open_priority_counts(self) -> list[tuple[str, cp_model.LinearExpr]]:
-        weekend = lambda d: self.dates[d].weekday() >= 5
-        weekday = lambda d: self.dates[d].weekday() < 5
-        categories = [
-            ("overnight", lambda d, shift: shift == OVERNIGHT),
-            ("weekend 2-12", lambda d, shift: weekend(d) and shift == "2-12"),
-            ("weekend 8-8", lambda d, shift: weekend(d) and shift == "8-8"),
-            ("weekend 8-6", lambda d, shift: weekend(d) and shift == "8-6"),
-            ("weekday 2-12", lambda d, shift: weekday(d) and shift == "2-12"),
-            ("weekday 8-8", lambda d, shift: weekday(d) and shift == "8-8"),
-            ("weekday 8-6", lambda d, shift: weekday(d) and shift == "8-6"),
-        ]
-        return [
-            (
-                name,
-                sum(
-                    self.open[d, self.shift_index[shift]]
-                    for d in range(len(self.dates))
-                    for shift in SHIFT_NAMES
-                    if predicate(d, shift)
-                ),
-            )
-            for name, predicate in categories
-        ]
+    def _coverage_and_weekend_objective(self) -> cp_model.LinearExpr:
+        split_cost = max(1, int(self.config.quality_weights.weekend_single))
+        weekday_costs = {
+            "8-6": 1_000,
+            "8-8": 1_500,
+            "2-12": 2_000,
+        }
+        weekend_costs = {
+            "8-6": split_cost * 3,
+            "8-8": split_cost * 4,
+            "2-12": split_cost * 5,
+        }
+        open_cost: cp_model.LinearExpr | int = 0
+        for d, day in enumerate(self.dates):
+            costs = weekend_costs if day.weekday() >= 5 else weekday_costs
+            for shift in DAY_SHIFTS:
+                open_cost += costs[shift] * self.open[d, self.shift_index[shift]]
+        # OPEN O/N was already minimized and frozen in phase 1.
+        return open_cost + split_cost * sum(self.weekend_singles)
 
     def _calculate_target_hours(self) -> dict[str, int]:
         targets: dict[str, int] = {}

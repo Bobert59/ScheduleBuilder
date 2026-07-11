@@ -19,6 +19,10 @@ class ConfigTests(unittest.TestCase):
                     "name": "Nancy",
                     "mode": "prescribed",
                     "overnight_capable": False,
+                    "time_off": [
+                        "2026-10-05",
+                        {"start": "2026-10-06", "end": "2026-10-7"},
+                    ],
                     "assignments": {"2026-10-02": "8-6"},
                     "rules": [
                         {"type": "allowed_weekdays", "weekdays": ["Thu", "Friday"]},
@@ -33,7 +37,11 @@ class ConfigTests(unittest.TestCase):
             config = load_config(path)
         doctor = config.doctors[0]
         self.assertEqual(doctor.mode, DoctorMode.PRESCRIBED)
-        self.assertEqual(doctor.rules[0].values["weekdays"], [3, 4])
+        self.assertEqual(
+            [day.isoformat() for day in doctor.rules[0].values["dates"]],
+            ["2026-10-05", "2026-10-06", "2026-10-07"],
+        )
+        self.assertEqual(doctor.rules[1].values["weekdays"], [3, 4])
         self.assertEqual(next(iter(doctor.assignments.values())), "8-6")
 
     def test_default_doctor_cannot_have_prescribed_assignments(self) -> None:
@@ -53,7 +61,22 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaises(ConfigurationError):
                 load_config(path)
 
+    def test_time_off_range_cannot_end_before_it_starts(self) -> None:
+        raw = {
+            "schedule": {"start": "2026-10-01", "end": "2026-10-07"},
+            "doctors": [
+                {
+                    "name": "Doctor",
+                    "time_off": [{"start": "2026-10-06", "end": "2026-10-04"}],
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaises(ConfigurationError):
+                load_config(path)
+
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -108,6 +108,12 @@ def _max_overnights(context: RuleContext, rule: RuleSpec) -> None:
     )
 
 
+@register("max_overnight_block_length")
+def _max_overnight_block_length(_context: RuleContext, _rule: RuleSpec) -> None:
+    # The optimizer applies this across imported history and the new schedule.
+    return
+
+
 @register("max_weekend_days")
 def _max_weekend_days(context: RuleContext, rule: RuleSpec) -> None:
     context.model.add(

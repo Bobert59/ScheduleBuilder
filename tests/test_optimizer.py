@@ -84,6 +84,29 @@ class OptimizerTests(unittest.TestCase):
         self.assertEqual(result.assignments["Saturday Doctor"][saturday], "8-6")
         self.assertNotIn(saturday + timedelta(days=1), result.assignments["Saturday Doctor"])
 
+    def test_max_weekend_pairs_remains_a_hard_cap(self) -> None:
+        start = date(2026, 10, 5)  # Monday; the window contains two full weekends.
+        doctor = DoctorConfig(
+            name="Weekend Doctor",
+            max_weekend_pairs=1,
+            rules=(
+                RuleSpec("allowed_weekdays", {"weekdays": [5, 6]}),
+                RuleSpec("allowed_shifts", {"shifts": ["8-6"]}),
+                RuleSpec("max_total_shifts", {"value": 4}),
+            ),
+        )
+        result = ScheduleOptimizer(
+            fast_config(start, start + timedelta(days=13), (doctor,)),
+            empty_history(start - timedelta(days=1)),
+        ).solve()
+        assignments = result.assignments[doctor.name]
+        pair_count = 0
+        for saturday in (start + timedelta(days=5), start + timedelta(days=12)):
+            pair_count += int(
+                saturday in assignments and saturday + timedelta(days=1) in assignments
+            )
+        self.assertLessEqual(pair_count, 1)
+
     def test_overnights_use_blocks_and_balance_against_history(self) -> None:
         start = date(2026, 10, 5)
         end = start + timedelta(days=13)
@@ -129,6 +152,36 @@ class OptimizerTests(unittest.TestCase):
             self.assertNotIn(1, blocks)
             self.assertTrue(all(length in (2, 3) for length in blocks))
         self.assertLessEqual(max(combined_counts) - min(combined_counts), 1)
+
+    def test_doctor_specific_overnight_block_limit_spans_history_boundary(self) -> None:
+        start = date(2026, 10, 5)
+        overnight_only = RuleSpec("allowed_shifts", {"shifts": ["O/N"]})
+        doctors = (
+            DoctorConfig(
+                name="Emily",
+                overnight_capable=True,
+                rules=(
+                    overnight_only,
+                    RuleSpec("max_overnight_block_length", {"value": 2}),
+                ),
+            ),
+            DoctorConfig(name="Other", overnight_capable=True, rules=(overnight_only,)),
+        )
+        history_dates = tuple(start - timedelta(days=offset) for offset in reversed(range(7)))
+        history = HistorySchedule(
+            source=Path("test.xlsx"),
+            dates=history_dates,
+            assignments={
+                "Emily": {
+                    history_dates[-2]: "O/N",
+                    history_dates[-1]: "O/N",
+                }
+            },
+            open_shifts={},
+        )
+        result = ScheduleOptimizer(fast_config(start, start, doctors), history).solve()
+        self.assertNotIn(start, result.assignments["Emily"])
+        self.assertEqual(result.assignments["Other"][start], "O/N")
 
 
 if __name__ == "__main__":

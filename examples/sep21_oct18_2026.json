@@ -16,12 +16,12 @@
   },
   "quality_weights": {
     "hour_balance": 1,
-    "weekend_single": 5000,
+    "weekend_single": 10000,
     "isolated_workday": 20
   },
   "solver": {
-    "max_time_per_phase_seconds": 30,
-    "workers": 8,
+    "max_time_per_phase_seconds": 60,
+    "workers": 6,
     "random_seed": 2026,
     "log_progress": false
   },
@@ -32,6 +32,7 @@
       "overnight_capable": true,
       "max_weekend_pairs": 0,
       "rules": [
+        {"type": "max_overnight_block_length", "value": 2},
         {"type": "max_weekend_days", "value": 0}
       ]
     },
@@ -78,19 +79,15 @@
       "rules": []
     },
     {
-      "name": "Vanessa",
-      "mode": "fixed",
-      "overnight_capable": true,
-      "assignments": {
-        "2026-09-21": "O/N"
-      },
-      "rules": []
-    },
-    {
       "name": "Alysha",
       "mode": "fixed",
       "overnight_capable": true,
-      "assignments": {},
+      "assignments": {
+        "2026-09-21": "8-6", "2026-09-25": "2-12", "2026-09-26": "2-12", "2026-09-27": "2-12",
+        "2026-09-30": "8-6", "2026-10-01": "8-6", "2026-10-02": "8-8",
+        "2026-10-07": "8-8", "2026-10-08": "8-8", "2026-10-09": "8-8",
+        "2026-10-14": "8-6", "2026-10-15": "8-6", "2026-10-16": "8-8"
+      },
       "rules": []
     },
     {
@@ -104,12 +101,9 @@
     },
     {
       "name": "Adrian",
-      "mode": "prescribed",
+      "mode": "default",
       "overnight_capable": false,
       "max_weekend_pairs": 0,
-      "assignments": {
-        "2026-10-15": "8-6"
-      },
       "rules": [
         {"type": "allowed_shifts", "shifts": ["8-6"]},
         {"type": "max_weekend_days", "value": 0}
@@ -124,14 +118,13 @@
       ]
     },
     {
-      "name": "Jon",
-      "mode": "fixed",
+      "name": "Jess",
+      "mode": "default",
       "overnight_capable": false,
-      "assignments": {
-        "2026-09-23": "2-12",
-        "2026-09-24": "2-12"
-      },
-      "rules": []
+      "rules": [
+        {"type": "max_total_shifts", "value": 4},
+        {"type": "max_weekend_days", "value": 0}
+      ]
     }
   ]
 }

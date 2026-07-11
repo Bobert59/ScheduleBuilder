@@ -14,7 +14,7 @@ dependencies = [
 
 [project.scripts]
 schedule-builder = "schedule_builder.cli:main"
+schedule-builder-gui = "schedule_builder.gui:main"
 
 [tool.setuptools.packages.find]
 include = ["schedule_builder*"]
-

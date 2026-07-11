@@ -18,13 +18,13 @@ from .domain import (
 from .rules import unavailable_dates_for
 
 
-HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
-WEEKEND_FILL = PatternFill("solid", fgColor="548235")
-UNAVAILABLE_FILL = PatternFill("solid", fgColor="F4CCCC")
-FIXED_FILL = PatternFill("solid", fgColor="CFE2F3")
-PRESCRIBED_FILL = PatternFill("solid", fgColor="FFE599")
-OPEN_FILL = PatternFill("solid", fgColor="F4CCCC")
-THIN_GRAY = Side(style="thin", color="D9E1F2")
+HEADER_FILL = PatternFill("solid", fgColor="FF1F4E78")
+SCHEDULE_HEADER_FILL = PatternFill("solid", fgColor="FFE8E8E8")
+UNAVAILABLE_FILL = PatternFill("solid", fgColor="FFF2CEEF")
+PROTECTED_FILL = PatternFill("solid", fgColor="FFDAF2D0")
+OPEN_FILL = PatternFill("solid", fgColor="FFFFFF00")
+THIN_GRAY = Side(style="thin", color="FFD9E1F2")
+THIN_BLACK = Side(style="thin", color="FF000000")
 GRID_BORDER = Border(left=THIN_GRAY, right=THIN_GRAY, top=THIN_GRAY, bottom=THIN_GRAY)
 
 
@@ -55,48 +55,40 @@ def write_schedule_workbook(
     schedule.title = "Schedule"
     dates = config.dates
 
-    schedule.cell(row=1, column=1, value="Doctor")
+    corner = schedule.cell(row=1, column=1)
+    corner.fill = SCHEDULE_HEADER_FILL
+    corner.font = Font(name="Aptos Narrow", size=11, bold=True, color="FF000000")
     for column, day in enumerate(dates, start=2):
-        cell = schedule.cell(row=1, column=column, value=f"{day:%a}\n{day:%b %d}")
-        cell.fill = WEEKEND_FILL if day.weekday() >= 5 else HEADER_FILL
-        cell.font = Font(color="FFFFFF", bold=True)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell = schedule.cell(row=1, column=column, value=f"{day:%a}\n  {day:%b %d}")
+        cell.fill = SCHEDULE_HEADER_FILL
+        cell.font = Font(name="Aptos Narrow", size=11, bold=True, color="FF000000")
 
     rows = [(doctor.name, result.assignments[doctor.name]) for doctor in config.doctors]
     rows.extend(_open_rows(result, dates))
     doctor_by_name = {doctor.name: doctor for doctor in config.doctors}
     for row_number, (name, assignments) in enumerate(rows, start=2):
         name_cell = schedule.cell(row=row_number, column=1, value=name)
-        name_cell.font = Font(bold=True)
-        name_cell.fill = OPEN_FILL if name.upper().startswith("OPEN") else HEADER_FILL
-        name_cell.font = Font(
-            bold=True,
-            color="000000" if name.upper().startswith("OPEN") else "FFFFFF",
-        )
+        name_cell.font = Font(name="Aptos Narrow", size=11, bold=True, color="FF000000")
         doctor = doctor_by_name.get(name)
         unavailable = unavailable_dates_for(doctor, dates) if doctor else set()
         for column, day in enumerate(dates, start=2):
             cell = schedule.cell(row=row_number, column=column, value=assignments.get(day))
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            if name.upper().startswith("OPEN"):
+            cell.font = Font(name="Aptos Narrow", size=11, color="FF000000")
+            if name.upper().startswith("OPEN") and cell.value:
                 cell.fill = OPEN_FILL
-            elif doctor and doctor.mode == DoctorMode.FIXED:
-                cell.fill = FIXED_FILL
             elif doctor and day in doctor.assignments:
-                cell.fill = PRESCRIBED_FILL
+                cell.fill = PROTECTED_FILL
             elif day in unavailable:
                 cell.fill = UNAVAILABLE_FILL
 
-    for row in schedule.iter_rows(min_row=1, max_row=schedule.max_row, min_col=1, max_col=schedule.max_column):
-        for cell in row:
-            cell.border = GRID_BORDER
-    schedule.freeze_panes = "B2"
-    schedule.auto_filter.ref = f"A1:{get_column_letter(schedule.max_column)}{schedule.max_row}"
-    schedule.column_dimensions["A"].width = 20
-    for column in range(2, schedule.max_column + 1):
-        schedule.column_dimensions[get_column_letter(column)].width = 12
-    schedule.row_dimensions[1].height = 34
-    schedule.sheet_view.showGridLines = False
+    for row in range(1, schedule.max_row + 1):
+        for column in range(1, schedule.max_column + 1):
+            cell = schedule.cell(row=row, column=column)
+            left = THIN_BLACK if column == 1 else None
+            right = THIN_BLACK if column == 1 or dates[column - 2].weekday() == 6 else None
+            top = THIN_BLACK if row == 1 and column == 1 else None
+            bottom = THIN_BLACK if row == schedule.max_row or (row == 1 and column == 1) else None
+            cell.border = Border(left=left, right=right, top=top, bottom=bottom)
 
     summary = workbook.create_sheet("Summary")
     headers = [
@@ -185,10 +177,10 @@ def write_schedule_workbook(
         details.append([report.name, report.status, report.objective, round(report.wall_time_seconds, 3)])
     details.append([])
     details.append(["Legend", "Meaning"])
-    details.append(["Blue", "Fixed doctor schedule"])
-    details.append(["Gold", "Prescribed assignment"])
-    details.append(["Red", "Unavailable date or automatic OPEN shift"])
-    details.append(["Green header", "Weekend"])
+    details.append(["Green", "Fixed or prescribed assignment"])
+    details.append(["Purple", "Unavailable date"])
+    details.append(["Yellow", "Automatic OPEN shift"])
+    details.append(["Gray header", "Schedule date"])
     details.append([])
     details.append(["OPEN priority (first used)", "Weekday 8-6, weekday 8-8, weekday 2-12, weekend 8-6, weekend 8-8, weekend 2-12, O/N"])
     _style_table(details, header_row=7)
@@ -205,7 +197,7 @@ def _style_table(sheet, header_row: int = 1) -> None:
     for cell in sheet[header_row]:
         if cell.value is not None:
             cell.fill = HEADER_FILL
-            cell.font = Font(color="FFFFFF", bold=True)
+            cell.font = Font(color="FFFFFFFF", bold=True)
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     for row in sheet.iter_rows():
         for cell in row:
@@ -218,4 +210,3 @@ def _style_table(sheet, header_row: int = 1) -> None:
     for column in range(1, sheet.max_column + 1):
         values = [len(str(sheet.cell(row=row, column=column).value or "")) for row in range(1, sheet.max_row + 1)]
         sheet.column_dimensions[get_column_letter(column)].width = min(max(values, default=8) + 2, 28)
-
